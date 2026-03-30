@@ -12,8 +12,11 @@ loop                bool  Restart from the beginning when the sequence ends
 enable_lidar        bool  Publish raw LiDAR PointCloud2 (default: true).
 enable_camera_left  bool  Publish left camera Image (default: true).
 enable_camera_right bool  Publish right camera Image (default: true).
-enable_radar_cartesian bool Publish cartesian radar Image (default: true).
-enable_radar_polar  bool  Publish polar radar Image (default: true).
+enable_radar_cartesian bool Publish cartesian radar PointCloud2 (default: true).
+enable_radar_polar  bool  Publish polar radar PointCloud2 (default: true).
+radar_threshold     int   Greyscale threshold 0–255; radar pixels ≤ this value
+                          are treated as background and excluded from the cloud
+                          (default: 0, i.e. include every non-zero pixel).
 enable_imu          bool  Publish Imu (default: true).
 enable_gps          bool  Publish NavSatFix (default: true).
 
@@ -32,8 +35,8 @@ Published topics
 /radiate/lidar/points           sensor_msgs/PointCloud2
 /radiate/camera_left/image_raw  sensor_msgs/Image   (bgr8, 672×376)
 /radiate/camera_right/image_raw sensor_msgs/Image   (bgr8, 672×376)
-/radiate/radar/cartesian        sensor_msgs/Image   (bgr8, 1152×1152)
-/radiate/radar/polar            sensor_msgs/Image   (bgr8 or mono8, 576×400)
+/radiate/radar/cartesian        sensor_msgs/PointCloud2  (x, y, z=0, intensity)
+/radiate/radar/polar            sensor_msgs/PointCloud2  (x, y, z=0, intensity)
 /radiate/imu/data               sensor_msgs/Imu
 /radiate/gps/fix                sensor_msgs/NavSatFix
 """
@@ -53,6 +56,8 @@ from .msg_utils import (
     imu_dict_to_msg,
     ndarray_to_image_msg,
     ndarray_to_pointcloud2,
+    radar_cartesian_to_pointcloud2,
+    radar_polar_to_pointcloud2,
 )
 
 
@@ -77,6 +82,7 @@ class RadiatePlayerNode(Node):
         self.declare_parameter('enable_radar_polar', True)
         self.declare_parameter('enable_imu', True)
         self.declare_parameter('enable_gps', True)
+        self.declare_parameter('radar_threshold', 0)
 
         self.declare_parameter('base_frame_id', 'base_link')
         self.declare_parameter('lidar_frame_id', 'radiate_lidar')
@@ -111,6 +117,7 @@ class RadiatePlayerNode(Node):
         self._en_radar_polar = self._as_bool(self._val('enable_radar_polar'))
         self._en_imu = self._as_bool(self._val('enable_imu'))
         self._en_gps = self._as_bool(self._val('enable_gps'))
+        self._radar_threshold = int(self._val('radar_threshold'))
 
         self._base_frame = self._str('base_frame_id')
         self._lidar_frame = self._str('lidar_frame_id')
@@ -148,10 +155,10 @@ class RadiatePlayerNode(Node):
             Image, '/radiate/camera_right/image_raw', self._en_cam_right
         )
         self._pub_radar_cart = _pub(
-            Image, '/radiate/radar/cartesian', self._en_radar_cart
+            PointCloud2, '/radiate/radar/cartesian', self._en_radar_cart
         )
         self._pub_radar_polar = _pub(
-            Image, '/radiate/radar/polar', self._en_radar_polar
+            PointCloud2, '/radiate/radar/polar', self._en_radar_polar
         )
         self._pub_imu = _pub(Imu, '/radiate/imu/data', self._en_imu)
         self._pub_gps = _pub(NavSatFix, '/radiate/gps/fix', self._en_gps)
@@ -231,18 +238,20 @@ class RadiatePlayerNode(Node):
                 self._pub_cam_right.publish(msg)
 
         if self._en_radar_cart and 'radar_cart' in frame:
-            msg = ndarray_to_image_msg(
-                frame['radar_cart'], stamp, self._radar_frame, self._bridge
+            self._pub_radar_cart.publish(
+                radar_cartesian_to_pointcloud2(
+                    frame['radar_cart'], stamp, self._radar_frame,
+                    threshold=self._radar_threshold,
+                )
             )
-            if msg:
-                self._pub_radar_cart.publish(msg)
 
         if self._en_radar_polar and 'radar_polar' in frame:
-            msg = ndarray_to_image_msg(
-                frame['radar_polar'], stamp, self._radar_frame, self._bridge
+            self._pub_radar_polar.publish(
+                radar_polar_to_pointcloud2(
+                    frame['radar_polar'], stamp, self._radar_frame,
+                    threshold=self._radar_threshold,
+                )
             )
-            if msg:
-                self._pub_radar_polar.publish(msg)
 
         if self._en_imu and 'imu' in frame:
             self._pub_imu.publish(

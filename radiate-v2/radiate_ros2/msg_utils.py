@@ -5,6 +5,7 @@ No node state, no rclpy.init, no publishers — just data transformations.
 Every function is safe to call from multiple threads.
 """
 
+import cv2
 import numpy as np
 
 from cv_bridge import CvBridge
@@ -107,6 +108,115 @@ def ndarray_to_image_msg(
     msg = bridge.cv2_to_imgmsg(arr, encoding=encoding)
     msg.header = _header(stamp, frame_id)
     return msg
+
+
+# --------------------------------------------------------------------------- #
+# Radar → PointCloud2
+# --------------------------------------------------------------------------- #
+
+# RADIATE Navtech CTS350-X factory values (from config/config.yaml)
+_RADAR_RANGE_RES_M: float = 0.173611   # metres per range bin / cartesian pixel
+_RADAR_RANGE_CELLS: int = 576          # bins covering ~100 m
+_RADAR_AZIMUTH_CELLS: int = 400        # bins covering 360°
+
+
+def radar_cartesian_to_pointcloud2(
+    img: np.ndarray,
+    stamp,
+    frame_id: str,
+    range_res: float = _RADAR_RANGE_RES_M,
+    threshold: int = 0,
+) -> PointCloud2:
+    """
+    Convert a cartesian radar BEV image to ``PointCloud2``.
+
+    The image centre is taken as the radar origin.  Every pixel whose
+    greyscale value is strictly greater than *threshold* becomes a point
+    at z = 0 with ``intensity`` set to that greyscale value (0–255).
+
+    Coordinate convention (ROS REP-105, radar at origin):
+        +x  forward  (image top    — row decreasing from centre)
+        +y  left     (image left   — col decreasing from centre)
+        z = 0
+
+    Parameters
+    ----------
+    img       : (H, W) or (H, W, 3) uint8 array
+    range_res : metres per pixel  (RADIATE default 0.173611)
+    threshold : 0–255; pixels ≤ threshold are skipped as background
+    """
+    if img is None:
+        return ndarray_to_pointcloud2(None, stamp, frame_id)
+
+    arr = np.asarray(img, dtype=np.uint8)
+    if arr.ndim == 3:
+        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+
+    cr, cc = arr.shape[0] / 2.0, arr.shape[1] / 2.0
+
+    rows, cols = np.nonzero(arr > threshold)
+    if rows.size == 0:
+        return ndarray_to_pointcloud2(None, stamp, frame_id)
+
+    x = ((cr - rows) * range_res).astype(np.float32)
+    y = ((cc - cols) * range_res).astype(np.float32)
+    z = np.zeros(rows.size, dtype=np.float32)
+    intensity = arr[rows, cols].astype(np.float32)
+
+    return ndarray_to_pointcloud2(
+        np.column_stack([x, y, z, intensity]), stamp, frame_id
+    )
+
+
+def radar_polar_to_pointcloud2(
+    img: np.ndarray,
+    stamp,
+    frame_id: str,
+    range_res: float = _RADAR_RANGE_RES_M,
+    num_azimuths: int = _RADAR_AZIMUTH_CELLS,
+    threshold: int = 0,
+) -> PointCloud2:
+    """
+    Convert a polar radar image to ``PointCloud2``.
+
+    Expected image layout (RADIATE Navtech_Polar files):
+        rows = range bins   (row 0 = nearest,  ~0.174 m per bin)
+        cols = azimuth bins (col 0 = forward,  increases clockwise)
+
+    Coordinate convention (ROS REP-105, radar at origin):
+        +x  forward  (azimuth 0°)
+        +y  left     (azimuth 270° clockwise = 90° CCW)
+        z = 0
+
+    Parameters
+    ----------
+    img          : (range_cells, azimuth_cells) or (H, W, 3) uint8 array
+    range_res    : metres per range bin  (RADIATE default 0.173611)
+    num_azimuths : total bins covering 360°  (RADIATE default 400)
+    threshold    : 0–255; cells ≤ threshold are skipped as background
+    """
+    if img is None:
+        return ndarray_to_pointcloud2(None, stamp, frame_id)
+
+    arr = np.asarray(img, dtype=np.uint8)
+    if arr.ndim == 3:
+        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+
+    rows, cols = np.nonzero(arr > threshold)
+    if rows.size == 0:
+        return ndarray_to_pointcloud2(None, stamp, frame_id)
+
+    range_m = (rows * range_res).astype(np.float32)
+    # col 0 = forward (+x); azimuth increases clockwise, so sin is negated for +y=left
+    azimuth = (cols * (2.0 * np.pi / num_azimuths)).astype(np.float32)
+    x = range_m * np.cos(azimuth)
+    y = -range_m * np.sin(azimuth)
+    z = np.zeros(rows.size, dtype=np.float32)
+    intensity = arr[rows, cols].astype(np.float32)
+
+    return ndarray_to_pointcloud2(
+        np.column_stack([x, y, z, intensity]), stamp, frame_id
+    )
 
 
 # --------------------------------------------------------------------------- #
