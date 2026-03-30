@@ -137,7 +137,8 @@ ros2 launch radiate_ros2 radiate_player.launch.py \
     camera_right_frame_id:=radiate_camera_right \
     radar_frame_id:=radiate_radar \
     imu_frame_id:=radiate_imu \
-    gps_frame_id:=radiate_gps
+    gps_frame_id:=radiate_gps \
+    radar_threshold:=20
 ```
 
 ### Via `ros2 run` (manual parameter passing)
@@ -161,8 +162,8 @@ ros2 run radiate_ros2 player \
 | `/radiate/lidar/points` | `sensor_msgs/PointCloud2` | Raw Velodyne HDL-32e point cloud (x, y, z, intensity, ring) |
 | `/radiate/camera_left/image_raw` | `sensor_msgs/Image` | Left ZED camera, bgr8, 672×376 |
 | `/radiate/camera_right/image_raw` | `sensor_msgs/Image` | Right ZED camera, bgr8, 672×376 |
-| `/radiate/radar/cartesian` | `sensor_msgs/Image` | Navtech radar Cartesian image, 1152×1152 |
-| `/radiate/radar/polar` | `sensor_msgs/Image` | Navtech radar polar image, 576×400 |
+| `/radiate/radar/cartesian` | `sensor_msgs/PointCloud2` | Navtech radar vizualized as a point cloud, (x, y, z, intensity) |
+| `/radiate/radar/polar` | `sensor_msgs/PointCloud2` | Navtech radar vizualized as a point cloud, (x, y, z, intensity) |
 | `/radiate/imu/data` | `sensor_msgs/Imu` | Advanced Navigation IMU (orientation + angular vel + linear accel) |
 | `/radiate/gps/fix` | `sensor_msgs/NavSatFix` | GPS fix (lat / lon / alt) |
 
